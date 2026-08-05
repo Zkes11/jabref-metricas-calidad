@@ -1,0 +1,203 @@
+# ============================================================================
+#  CircleCI - Métricas de Calidad para JabRef
+# ============================================================================
+#  Configuración del pipeline en CircleCI. Ejecuta los mismos checks que
+#  azure-pipelines.yml pero en la infraestructura de CircleCI.
+#
+#  Estructura:
+#    - 3 jobs paralelos: build_test, quality, static_analysis
+#    - Caching de dependencias Gradle
+#    - Publicación de test results y artifacts en la UI de CircleCI
+#
+#  Cómo verlo en la nube:
+#    1. Crear cuenta en https://app.circleci.com (entrar con GitHub)
+#    2. "Projects" > buscar tu fork del repo > "Set Up Project"
+#    3. Elegir "Existing config" y apuntar a .circleci/config.yml
+#    4. Listo, cada push dispara el pipeline
+# ============================================================================
+
+version: 2.1
+
+orbs:
+  # El orb de codecov sube la cobertura a codecov.io automáticamente
+  codecov: codecov/codecov@4.1.0
+
+# ----------------------------------------------------------------------------
+# Executors: imágenes Docker reutilizables
+# ----------------------------------------------------------------------------
+executors:
+  jdk25:
+    docker:
+      # CircleCI mantiene imágenes con OpenJDK. cimg/openjdk:25.0 ya trae JDK 25.
+      - image: cimg/openjdk:25.0
+    working_directory: ~/jabref
+    environment:
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.caching=true -Dorg.gradle.parallel=true -Xmx4g"
+      JAVA_TOOL_OPTIONS: "-Xmx4g"
+
+# ----------------------------------------------------------------------------
+# Comandos reutilizables
+# ----------------------------------------------------------------------------
+commands:
+  init_submodules:
+    description: "Inicializar submodules de Git (csl-styles, ltwa, abbrv)"
+    steps:
+      - run:
+          name: "📂 Inicializar submodules"
+          command: git submodule update --init --depth 1
+
+  setup_gradle_cache:
+    description: "Restaura cache de Gradle"
+    steps:
+      - restore_cache:
+          keys:
+            - gradle-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}-{{ checksum "build.gradle.kts" }}-{{ checksum "versions/build.gradle.kts" }}
+            - gradle-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}-
+            - gradle-
+      - run:
+          name: "Mostrar versión Java"
+          command: java -version
+
+  save_gradle_cache:
+    description: "Persistir cache de Gradle"
+    steps:
+      - save_cache:
+          paths:
+            - ~/.gradle/caches
+            - ~/.gradle/wrapper
+          key: gradle-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}-{{ checksum "build.gradle.kts" }}-{{ checksum "versions/build.gradle.kts" }}
+          when: always
+
+# ----------------------------------------------------------------------------
+# Jobs
+# ----------------------------------------------------------------------------
+jobs:
+  build_test:
+    executor: jdk25
+    description: "Compila + tests unitarios + cobertura"
+    steps:
+      - checkout
+      - init_submodules
+      - setup_gradle_cache
+      - run:
+          name: "🔨 Compilar (assemble)"
+          command: ./gradlew assemble --no-daemon --stacktrace
+      - run:
+          name: "🧪 Tests unitarios"
+          command: |
+            ./gradlew test --no-daemon --stacktrace \
+              -x databaseTest -x fetcherTest
+      - run:
+          name: "📊 Reporte JaCoCo"
+          command: ./gradlew :jablib:jacocoTestReport --no-daemon
+          when: always
+      # CircleCI recolecta los XML de test y los muestra en la pestaña "Tests"
+      - store_test_results:
+          path: ~/jabref/jablib/build/test-results
+      - store_test_results:
+          path: ~/jabref/jabgui/build/test-results
+      - store_artifacts:
+          path: ~/jabref/jablib/build/reports/jacoco/test/html
+          destination: jacoco-report
+      # Sube cobertura a codecov.io (requiere CODECOV_TOKEN en env vars)
+      - codecov/upload:
+          file: ~/jabref/jablib/build/reports/jacoco/test/jacocoTestReport.xml
+          when: on_fail
+      - save_gradle_cache
+
+  quality:
+    executor: jdk25
+    description: "Checkstyle + Modernizer + OpenRewrite"
+    steps:
+      - checkout
+      - init_submodules
+      - setup_gradle_cache
+      - run:
+          name: "✏️ Checkstyle"
+          command: ./gradlew checkstyleMain checkstyleTest --no-daemon
+          when: always
+      - run:
+          name: "🔄 Modernizer"
+          command: ./gradlew modernizer --no-daemon
+          when: always
+      - run:
+          name: "🪄 OpenRewrite dry-run"
+          command: ./gradlew rewriteDryRun --no-daemon
+          when: always
+      # Guardar reportes HTML de checkstyle/modernizer de cada módulo
+      - store_artifacts:
+          path: ~/jabref/jablib/build/reports/checkstyle
+          destination: jablib-checkstyle
+          when: always
+      - store_artifacts:
+          path: ~/jabref/jabgui/build/reports/checkstyle
+          destination: jabgui-checkstyle
+          when: always
+      - save_gradle_cache
+
+  static_analysis:
+    executor: jdk25
+    description: "SpotBugs + OWASP Dependency-Check (standalone)"
+    steps:
+      - checkout
+      - init_submodules
+      - setup_gradle_cache
+      - run:
+          name: "🔨 Compilar clases para análisis"
+          command: ./gradlew compileJava --no-daemon
+      - run:
+          name: "🐞 SpotBugs (descarga standalone)"
+          command: |
+            set -e
+            SPOTBUGS_VERSION=4.8.6
+            curl -sSL "https://repo1.maven.org/maven2/com/github/spotbugs/spotbugs/$SPOTBUGS_VERSION/spotbugs-$SPOTBUGS_VERSION.tgz" \
+              | tar xz -C $HOME
+            export SPOTBUGS_HOME=$HOME/spotbugs-$SPOTBUGS_VERSION
+            mkdir -p ~/reports/spotbugs
+            for module in jablib jabgui jabkit jabsrv jabls jabls-cli jabsrv-cli; do
+              classes_dir="~/jabref/$module/build/classes/java/main"
+              if [ -d "$classes_dir" ]; then
+                echo "Analizando $module..."
+                $SPOTBUGS_HOME/bin/spotbugs \
+                  -textui -html \
+                  -output ~/reports/spotbugs/spotbugs-$module.html \
+                  -exclude ~/jabref/scripts/spotbugs-exclude.xml \
+                  "$classes_dir" || true
+              fi
+            done
+          when: always
+      - run:
+          name: "🛡️ OWASP Dependency-Check (descarga standalone)"
+          command: |
+            set -e
+            DEP_CHECK_VERSION=10.0.4
+            curl -sSL "https://repo1.maven.org/maven2/org/owasp/dependency-check-cli/$DEP_CHECK_VERSION/dependency-check-cli-$DEP_CHECK_VERSION-release.zip" -o dep-check.zip
+            unzip -q dep-check.zip -d $HOME
+            mkdir -p ~/reports/dep-check
+            $HOME/dependency-check/bin/dependency-check.sh \
+              --project "JabRef" \
+              --scan ~/jabref/jablib/build/libs \
+              --scan ~/jabref/jabgui/build/libs \
+              --out ~/reports/dep-check \
+              --format HTML --format JSON \
+              --failOnCVSS 9 \
+              || echo "Dependency-Check encontró vulnerabilidades (ver reporte)."
+          when: always
+      - store_artifacts:
+          path: ~/reports
+          destination: static-analysis-reports
+      - save_gradle_cache
+
+# ----------------------------------------------------------------------------
+# Workflows: orchestación de los jobs
+# ----------------------------------------------------------------------------
+workflows:
+  version: 2
+  calidad_jabref:
+    jobs:
+      - build_test:
+          name: build-test
+      - quality:
+          name: quality-checks
+      - static_analysis:
+          name: static-analysis

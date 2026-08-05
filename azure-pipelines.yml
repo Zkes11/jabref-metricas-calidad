@@ -1,0 +1,305 @@
+# ============================================================================
+#  Azure Pipelines - Métricas de Calidad para JabRef
+# ============================================================================
+#  Este pipeline corre métricas de calidad de código en Microsoft Azure
+#  DevOps. Está dividido en 3 jobs paralelos para acelerar la ejecución.
+#
+#  Jobs:
+#    1) build_test       -> Compila + tests unitarios + cobertura (JaCoCo)
+#    2) quality          -> Checkstyle + Modernizer + OpenRewrite
+#    3) static_analysis  -> SpotBugs + OWASP Dependency-Check (standalone)
+#
+#  Cómo verlo en la nube:
+#    - Crear cuenta en https://dev.azure.com (gratuita, hasta 1.800 min/mes)
+#    - Crear un proyecto nuevo
+#    - "Pipelines" > "New pipeline" > conectar el repo de GitHub
+#    - Seleccionar "Existing Azure Pipelines file" y apuntar a este archivo
+# ============================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+      - master
+  paths:
+    exclude:
+      - '*.md'
+      - 'docs/**'
+
+pr:
+  branches:
+    include:
+      - main
+      - master
+
+variables:
+  GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.caching=true -Dorg.gradle.parallel=true'
+  GRADLE_USER_HOME: $(Pipeline.Workspace)/.gradle
+  JDK_VERSION: '25'
+
+stages:
+  - stage: Calidad
+    jobs:
+      # ===========================================================================
+      # JOB 1: BUILD + TESTS + COBERTURA
+      # ===========================================================================
+      - job: Build_Test
+        pool:
+          vmImage: ubuntu-latest
+        displayName: '🏗️ Build + Tests + Cobertura'
+        steps:
+          - checkout: self
+            fetchDepth: 1
+            submodules: true
+
+          # --- Instalar JDK 25 (no viene en ubuntu-latest) ---
+          - script: |
+              set -e
+              mkdir -p $HOME/jdk25
+              echo "Descargando Temurin JDK 25..."
+              curl -sSL "https://api.adoptium.net/v3/binary/latest/25/ga/linux/x64/jdk/hotspot/normal/eclipse?project=jdk" \
+                | tar xz -C $HOME/jdk25 --strip-components=1
+              echo "##vso[task.setvariable variable=JAVA_HOME]$HOME/jdk25"
+              echo "##vso[task.prependpath]$HOME/jdk25/bin"
+              java -version
+            displayName: '☕ Instalar JDK 25 (Temurin)'
+
+          # --- Cache de Gradle para acelerar builds siguientes ---
+          - task: Cache@2
+            inputs:
+              key: 'gradle | "$(Agent.OS)" | **/*.gradle.kts | **/gradle.properties | **/versions/build.gradle.kts'
+              restoreKeys: |
+                gradle | "$(Agent.OS)"
+                gradle
+              path: $(GRADLE_USER_HOME)
+            displayName: '💾 Cache Gradle'
+
+          # --- Compilar ---
+          - script: |
+              ./gradlew assemble --no-daemon --stacktrace
+            displayName: '🔨 Compilar (./gradlew assemble)'
+            env:
+              GRADLE_USER_HOME: $(GRADLE_USER_HOME)
+
+          # --- Tests unitarios (sin databaseTest ni fetcherTest que requieren servicios externos) ---
+          - script: |
+              ./gradlew test --no-daemon --stacktrace \
+                -x databaseTest -x fetcherTest
+            displayName: '🧪 Tests unitarios (./gradlew test)'
+            env:
+              GRADLE_USER_HOME: $(GRADLE_USER_HOME)
+            continueOnError: false
+
+          # --- Reporte de cobertura con JaCoCo ---
+          - script: |
+              ./gradlew :jablib:jacocoTestReport --no-daemon
+            displayName: '📊 Generar reporte JaCoCo'
+            env:
+              GRADLE_USER_HOME: $(GRADLE_USER_HOME)
+            continueOnError: true
+
+          # --- Publicar resultados de tests en Azure DevOps ---
+          - task: PublishTestResults@2
+            condition: always()
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '**/build/test-results/test/TEST-*.xml'
+              mergeTestResults: true
+              failTaskOnFailedTests: false
+              testRunTitle: 'JUnit Tests'
+            displayName: '📤 Publicar resultados de tests'
+
+          # --- Publicar reporte de cobertura ---
+          - task: PublishCodeCoverageResults@2
+            condition: always()
+            inputs:
+              summaryFileLocation: 'jablib/build/reports/jacoco/test/jacocoTestReport.xml'
+              pathToSources: 'jablib/src/main/java'
+              failIfCoverageEmpty: false
+            displayName: '📤 Publicar cobertura de código'
+
+          # --- Publicar reporte JaCoCo HTML como artifact ---
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              PathtoPublish: 'jablib/build/reports/jacoco/test/html'
+              ArtifactName: 'jacoco-report'
+              publishLocation: 'Container'
+            displayName: '📦 Subir reporte JaCoCo HTML'
+
+      # ===========================================================================
+      # JOB 2: CALIDAD DE CÓDIGO (Checkstyle + Modernizer + OpenRewrite)
+      # ===========================================================================
+      - job: Quality
+        pool:
+          vmImage: ubuntu-latest
+        displayName: '🧹 Calidad (Checkstyle + Modernizer)'
+        steps:
+          - checkout: self
+            fetchDepth: 1
+            submodules: true
+
+          - script: |
+              set -e
+              mkdir -p $HOME/jdk25
+              curl -sSL "https://api.adoptium.net/v3/binary/latest/25/ga/linux/x64/jdk/hotspot/normal/eclipse?project=jdk" \
+                | tar xz -C $HOME/jdk25 --strip-components=1
+              echo "##vso[task.setvariable variable=JAVA_HOME]$HOME/jdk25"
+              echo "##vso[task.prependpath]$HOME/jdk25/bin"
+            displayName: '☕ Instalar JDK 25'
+
+          - task: Cache@2
+            inputs:
+              key: 'gradle | "$(Agent.OS)" | **/*.gradle.kts'
+              restoreKeys: |
+                gradle | "$(Agent.OS)"
+              path: $(GRADLE_USER_HOME)
+            displayName: '💾 Cache Gradle'
+
+          # Checkstyle: revisa estilo/reglas de código
+          - script: |
+              ./gradlew checkstyleMain checkstyleTest --no-daemon
+            displayName: '✏️ Checkstyle (estilo de código)'
+            env:
+              GRADLE_USER_HOME: $(GRADLE_USER_HOME)
+            continueOnError: true
+
+          # Modernizer: detecta uso de APIs legacy de Java (que ya tienen reemplazo moderno)
+          - script: |
+              ./gradlew modernizer --no-daemon
+            displayName: '🔄 Modernizer (APIs legacy)'
+            env:
+              GRADLE_USER_HOME: $(GRADLE_USER_HOME)
+            continueOnError: true
+
+          # OpenRewrite dry-run: verifica si el código cumple con las recetas de refactor
+          - script: |
+              ./gradlew rewriteDryRun --no-daemon
+            displayName: '🪄 OpenRewrite (formato/refactors)'
+            env:
+              GRADLE_USER_HOME: $(GRADLE_USER_HOME)
+            continueOnError: true
+
+          # Consolidar todos los reportes HTML en una sola carpeta antes de publicar
+          - task: CopyFiles@2
+            condition: always()
+            inputs:
+              SourceFolder: '$(Build.SourcesDirectory)'
+              Contents: |
+                **/build/reports/checkstyle/*.html
+                **/build/reports/modernizer/*.html
+              TargetFolder: '$(Build.ArtifactStagingDirectory)/quality-reports'
+              CleanTargetFolder: true
+            displayName: '📋 Consolidar reportes de calidad'
+
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)/quality-reports'
+              ArtifactName: 'quality-reports'
+              publishLocation: 'Container'
+            displayName: '📦 Subir reportes de calidad'
+
+      # ===========================================================================
+      # JOB 3: ANÁLISIS ESTÁTICO EXTERNO (SpotBugs + Dependency-Check)
+      # ===========================================================================
+      - job: Static_Analysis
+        pool:
+          vmImage: ubuntu-latest
+        displayName: '🐞 Análisis estático (SpotBugs + OWASP Dep-Check)'
+        steps:
+          - checkout: self
+            fetchDepth: 1
+            submodules: true
+
+          - script: |
+              set -e
+              mkdir -p $HOME/jdk25
+              curl -sSL "https://api.adoptium.net/v3/binary/latest/25/ga/linux/x64/jdk/hotspot/normal/eclipse?project=jdk" \
+                | tar xz -C $HOME/jdk25 --strip-components=1
+              echo "##vso[task.setvariable variable=JAVA_HOME]$HOME/jdk25"
+              echo "##vso[task.prependpath]$HOME/jdk25/bin"
+            displayName: '☕ Instalar JDK 25'
+
+          - task: Cache@2
+            inputs:
+              key: 'gradle | "$(Agent.OS)" | **/*.gradle.kts'
+              restoreKeys: |
+                gradle | "$(Agent.OS)"
+              path: $(GRADLE_USER_HOME)
+            displayName: '💾 Cache Gradle'
+
+          # Necesitamos las clases compiladas para que SpotBugs las analice
+          - script: |
+              ./gradlew compileJava --no-daemon
+            displayName: '🔨 Compilar para análisis'
+            env:
+              GRADLE_USER_HOME: $(GRADLE_USER_HOME)
+
+          # --- SpotBugs standalone (no tocamos build-logic de JabRef) ---
+          - script: |
+              set -e
+              SPOTBUGS_VERSION=4.8.6
+              echo "Descargando SpotBugs $SPOTBUGS_VERSION..."
+              curl -sSL "https://repo1.maven.org/maven2/com/github/spotbugs/spotbugs/$SPOTBUGS_VERSION/spotbugs-$SPOTBUGS_VERSION.tgz" \
+                | tar xz -C $HOME
+              export SPOTBUGS_HOME=$HOME/spotbugs-$SPOTBUGS_VERSION
+
+              mkdir -p $(Build.SourcesDirectory)/build/spotbugs-reports
+
+              # Analizamos cada módulo Java principal
+              for module in jablib jabgui jabkit jabsrv jabls jabls-cli jabsrv-cli; do
+                classes_dir="$(Build.SourcesDirectory)/$module/build/classes/java/main"
+                if [ -d "$classes_dir" ]; then
+                  echo "Analizando $module..."
+                  $SPOTBUGS_HOME/bin/spotbugs \
+                    -textui \
+                    -html \
+                    -output $(Build.SourcesDirectory)/build/spotbugs-reports/spotbugs-$module.html \
+                    -exclude $(Build.SourcesDirectory)/scripts/spotbugs-exclude.xml \
+                    -auxclasspath "$(find $(Build.SourcesDirectory)/$module -name '*.jar' -path '*/dependencies/*' 2>/dev/null | tr '\n' ':')" \
+                    "$classes_dir" || true
+                fi
+              done
+              echo "SpotBugs terminó."
+            displayName: '🐞 SpotBugs (bugs / code smells)'
+            continueOnError: true
+
+          # --- OWASP Dependency-Check (CVEs en librerías) ---
+          - script: |
+              set -e
+              DEP_CHECK_VERSION=10.0.4
+              echo "Descargando OWASP Dependency-Check $DEP_CHECK_VERSION..."
+              curl -sSL "https://repo1.maven.org/maven2/org/owasp/dependency-check-cli/$DEP_CHECK_VERSION/dependency-check-cli-$DEP_CHECK_VERSION-release.zip" -o dep-check.zip
+              unzip -q dep-check.zip -d $HOME
+              export DEP_CHECK_HOME=$HOME/dependency-check
+
+              mkdir -p $(Build.SourcesDirectory)/build/dep-check-reports
+              # Corre contra el proyecto Gradle completo (escanea build.gradle.kts + jars generados)
+              $DEP_CHECK_HOME/bin/dependency-check.sh \
+                --project "JabRef" \
+                --scan $(Build.SourcesDirectory)/jablib/build/libs \
+                --scan $(Build.SourcesDirectory)/jabgui/build/libs \
+                --out $(Build.SourcesDirectory)/build/dep-check-reports \
+                --format HTML \
+                --format JSON \
+                --failOnCVSS 9 \
+                || echo "Dependency-Check encontró vulnerabilidades o falló (ver reporte)."
+            displayName: '🛡️ OWASP Dependency-Check (CVEs)'
+            continueOnError: true
+
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              PathtoPublish: '$(Build.SourcesDirectory)/build/spotbugs-reports'
+              ArtifactName: 'spotbugs-reports'
+              publishLocation: 'Container'
+            displayName: '📦 Subir reportes SpotBugs'
+
+          - task: PublishBuildArtifacts@1
+            condition: always()
+            inputs:
+              PathtoPublish: '$(Build.SourcesDirectory)/build/dep-check-reports'
+              ArtifactName: 'dependency-check-reports'
+              publishLocation: 'Container'
+            displayName: '📦 Subir reportes Dependency-Check'
