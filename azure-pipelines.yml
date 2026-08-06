@@ -96,10 +96,10 @@ stages:
               GRADLE_USER_HOME: $(GRADLE_USER_HOME)
             continueOnError: true
 
-          # --- Reporte de cobertura con JaCoCo (raíz, ejecuta en todos los módulos con plugin) ---
+          # --- Reporte de cobertura con JaCoCo (-x test: no volver a correr tests fallidos) ---
           - script: |
-              xvfb-run --auto-servernum ./gradlew :jablib:jacocoTestReport --no-daemon
-            displayName: '📊 Generar reporte JaCoCo'
+              xvfb-run --auto-servernum ./gradlew :jablib:jacocoTestReport -x test --no-daemon
+            displayName: '📊 Generar reporte JaCoCo (-x test)'
             env:
               GRADLE_USER_HOME: $(GRADLE_USER_HOME)
             continueOnError: true

@@ -90,7 +90,9 @@ jobs:
           command: xvfb-run --auto-servernum ./gradlew test --no-daemon --stacktrace -x databaseTest -x fetcherTest
       - run:
           name: "📊 Reporte JaCoCo"
-          command: xvfb-run --auto-servernum ./gradlew :jablib:jacocoTestReport --no-daemon
+          # -x test evita que JaCoCo vuelva a correr los tests fallidos.
+          # Usa los .exec files generados por el paso "Tests unitarios".
+          command: xvfb-run --auto-servernum ./gradlew :jablib:jacocoTestReport -x test --no-daemon
           when: always
       # CircleCI recolecta los XML de test y los muestra en la pestaña "Tests"
       - run:
