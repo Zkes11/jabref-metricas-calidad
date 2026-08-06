@@ -83,26 +83,28 @@ jobs:
           name: "🔨 Compilar (assemble)"
           command: ./gradlew assemble --no-daemon --stacktrace
       - run:
+          name: "🖥️ Instalar xvfb (display virtual para tests JavaFX)"
+          command: sudo apt-get update && sudo apt-get install -y xvfb
+      - run:
           name: "🧪 Tests unitarios"
-          command: |
-            ./gradlew test --no-daemon --stacktrace \
-              -x databaseTest -x fetcherTest
+          command: xvfb-run --auto-servernum ./gradlew test --no-daemon --stacktrace -x databaseTest -x fetcherTest
       - run:
           name: "📊 Reporte JaCoCo"
-          command: ./gradlew :jablib:jacocoTestReport --no-daemon
+          command: xvfb-run --auto-servernum ./gradlew jacocoTestReport --no-daemon
           when: always
       # CircleCI recolecta los XML de test y los muestra en la pestaña "Tests"
+      - run:
+          name: "📦 Consolidar reportes para artifacts"
+          when: always
+          command: |
+            mkdir -p ~/reports/test-results ~/reports/jacoco
+            find . -path "*/build/test-results/test" -type d -exec cp -r {} ~/reports/test-results/ \; 2>/dev/null || true
+            find . -path "*/build/reports/jacoco/test/html" -type d -exec cp -r {} ~/reports/jacoco/ \; 2>/dev/null || true
       - store_test_results:
-          path: ~/jabref/jablib/build/test-results
-      - store_test_results:
-          path: ~/jabref/jabgui/build/test-results
+          path: ~/reports/test-results
       - store_artifacts:
-          path: ~/jabref/jablib/build/reports/jacoco/test/html
-          destination: jacoco-report
-      # Sube cobertura a codecov.io (requiere CODECOV_TOKEN en env vars)
-      - codecov/upload:
-          file: ~/jabref/jablib/build/reports/jacoco/test/jacocoTestReport.xml
-          when: on_fail
+          path: ~/reports/jacoco
+          destination: jacoco-reports
       - save_gradle_cache
 
   quality:
