@@ -98,7 +98,7 @@ stages:
 
           # --- Reporte de cobertura con JaCoCo (raíz, ejecuta en todos los módulos con plugin) ---
           - script: |
-              xvfb-run --auto-servernum ./gradlew jacocoTestReport --no-daemon
+              xvfb-run --auto-servernum ./gradlew :jablib:jacocoTestReport --no-daemon
             displayName: '📊 Generar reporte JaCoCo'
             env:
               GRADLE_USER_HOME: $(GRADLE_USER_HOME)
