@@ -7,13 +7,17 @@ Este documento explica **qué hace cada herramienta de calidad**, **cómo correr
 ## 🗺️ Tabla de contenidos
 
 1. [Visión general](#-visión-general)
-2. [Cada herramienta: qué mide y qué detecta](#-cada-herramienta-qué-mide-y-qué-detecta)
-3. [Setup local: instalar JDK 25](#-setup-local-instalar-jdk-25)
-4. [Correr las herramientas localmente](#-correr-las-herramientas-localmente)
-5. [Setup de Azure DevOps (Microsoft)](#-setup-de-azure-devops-microsoft)
-6. [Setup de CircleCI](#-setup-de-circleci)
-7. [Comparativa: Azure DevOps vs CircleCI](#-comparativa-azure-devops-vs-circleci)
-8. [Qué se detectó al correr sobre JabRef](#-qué-se-detectó-al-correr-sobre-jabref)
+2. [Índice de guías](#-índice-de-guías)
+   - [Comparativa completa de plataformas CI](comparativa-ci.md)
+   - [Guía de lectura de resultados](guia-lectura-resultados.md)
+   - [Resumen ejecutivo del proyecto](resumen-ejecutivo.md)
+3. [Cada herramienta: qué mide y qué detecta](#-cada-herramienta-qué-mide-y-qué-detecta)
+4. [Setup local: instalar JDK 25](#-setup-local-instalar-jdk-25)
+5. [Correr las herramientas localmente](#-correr-las-herramientas-localmente)
+6. [Setup de Azure DevOps (Microsoft)](#-setup-de-azure-devops-microsoft)
+7. [Setup de CircleCI](#-setup-de-circleci)
+8. [Comparativa: Azure DevOps vs CircleCI](#-comparativa-azure-devops-vs-circleci)
+9. [Qué se detectó al correr sobre JabRef](#-qué-se-detectó-al-correr-sobre-jabref)
 
 ---
 
@@ -45,6 +49,18 @@ Los dos pipelines corren **las mismas verificaciones** pero en distintas platafo
 - **Doble validación** (un bug en una plataforma no bloquea todo)
 - **Aprender dos ecosistemas** de CI/CD distintos
 - **Comparar límites y costos** de cada proveedor
+
+---
+
+## 🧭 Índice de guías
+
+La documentación de calidad se completa con estas guías:
+
+- **[Setup de TestRail](testrail-setup-circleci.md)** — el checklist completo: cuenta trial, proyecto, API key y las variables en CircleCI **y Azure Pipelines** (§9).
+- **[Comparativa de plataformas CI](comparativa-ci.md)** — CircleCI vs Azure Pipelines vs GitHub Actions vs GitLab CI (free tiers, JDK 25, cobertura) — datos verificados agosto 2026.
+- **[Guía de lectura de resultados](guia-lectura-resultados.md)** — "¿dónde miro qué?": cada CI vs TestRail, incluido el caveat del "verde" de Azure.
+- **[Resumen ejecutivo](resumen-ejecutivo.md)** — el proyecto completo en una pantalla: qué se construyó, qué mide cada pieza y cómo adoptarlo en otro repo.
+- **[Template genérico](../../templates/README.md)** — el pipeline reutilizable para cualquier repo Java/Python/Node (checklist de ≤9 pasos).
 
 ---
 
@@ -298,6 +314,8 @@ CircleCI es un servicio de CI/CD puramente cloud, muy enfocado en velocidad (cac
 - **Azure DevOps**: si trabajás en enterprise que ya usa Microsoft 365 / Azure / Visual Studio.
 - **CircleCI**: si querés algo más liviano, rápido y enfocado solo en CI.
 
+> 📊 La **comparación completa de 4 plataformas** (CircleCI, Azure, GitHub Actions y GitLab — con free tiers, soporte JDK 25 y visualización de cobertura) vive en [`comparativa-ci.md`](comparativa-ci.md); la tabla de arriba queda como resumen rápido de las 2 que este proyecto usa.
+
 ---
 
 ## 📋 Qué se detectó al correr sobre JabRef
@@ -344,7 +362,25 @@ Cuando tengas los primeros resultados, volcá en esta sección los números conc
 | `scripts/run-quality.ps1` | Script PowerShell para correr todo local en Windows |
 | `scripts/run-quality.sh` | Script Bash para correr todo local en Linux/Mac |
 | `scripts/spotbugs-exclude.xml` | Filtros de falsos positivos para SpotBugs |
+| `scripts/upload-testrail.sh` | Sube los JUnit XML a TestRail (trcli); sin credenciales TESTRAIL_* salta limpio |
+| `templates/CONTRACT.md` | Contrato de variables del pipeline genérico (la "API" del template) |
+| `templates/README.md` | Guía de adopción del pipeline genérico (checklist de ≤9 pasos) |
+| `templates/circleci-config.yml` | Plantilla CircleCI lista para copiar (bloque `⚙️ CONFIGURÁ`) |
+| `templates/azure-pipelines.yml` | Plantilla Azure Pipelines lista para copiar (bloque `⚙️ CONFIGURÁ`) |
+| `templates/scripts/` | Scripts del template: `setup-defaults.sh`, `collect-junit.sh`, `upload-testrail.sh` |
+| `templates/adapters/` | Adapters por ecosistema: `java-gradle.md`, `python-pytest.md`, `node-jest.md` |
+| `docs/calidad/testrail-setup-circleci.md` | Guía de setup de TestRail + integración con CircleCI y Azure |
+| `docs/calidad/comparativa-ci.md` | Comparativa de 4 plataformas CI (datos verificados agosto 2026) |
+| `docs/calidad/guia-lectura-resultados.md` | Guía de lectura de resultados: ¿dónde miro qué? (CI vs TestRail) |
+| `docs/calidad/resumen-ejecutivo.md` | Resumen ejecutivo del proyecto (arquitectura, fases, adopción) |
+| `docs/decisions/0070-testrail-pipeline-generico.md` | ADR-0070: trcli + contrato JUnit XML + templates copy-paste |
 | `docs/calidad/README.md` | Este documento |
+
+---
+
+## ♻️ Pipeline genérico reutilizable
+
+Los pipelines de este repo se extrajeron a un **template copy-paste** que funciona en cualquier repo Java, Python o Node: `templates/` trae el contrato de variables ([`templates/CONTRACT.md`](../../templates/CONTRACT.md)), las 2 plantillas de CI (CircleCI y Azure), 3 scripts y 3 adapters por ecosistema. La adopción consiste en copiar `templates/` al repo destino y editar **solo el bloque `⚙️ CONFIGURÁ`** — guía completa en [`templates/README.md`](../../templates/README.md).
 
 ---
 
@@ -371,3 +407,12 @@ En Azure: comenta el job en `azure-pipelines.yml`. En CircleCI: comenta el job e
 - Modernizer: sí (`failOnViolations=true`).
 - SpotBugs: no (configurado con `continueOnError`).
 - Dep-Check: solo falla si hay CVE con score ≥ 9.
+
+**¿Por qué el pipeline de Azure se ve verde aunque fallen tests?**
+Es semántica **intencional**, no un bug: los steps de tests y JaCoCo usan `continueOnError: true` (y `PublishTestResults@2` tiene `failTaskOnFailedTests: false`). La postura es "siempre recolectar reportes": aunque los tests fallen, el pipeline junta los JUnit XML, la cobertura y los artifacts para que puedas inspeccionarlos. Los fallos **reales** se ven en la pestaña **Tests** del job (cada test con su stack trace), no en el semáforo. Para seguimiento histórico, TestRail es la fuente de verdad. Para el deep-dive (qué muestra cada herramienta y cómo leer un run de TestRail paso a paso), ver la [guía de lectura de resultados](guia-lectura-resultados.md).
+
+**¿Por qué se eliminó el orb de codecov de CircleCI?**
+Porque estaba declarado (`codecov/codecov@4.1.0`) pero **nunca se invocaba**: un commit anterior quitó el paso de subida y dejó la declaración colgando. Además, publicar en codecov.io exige un `CODECOV_TOKEN` que nunca se configuró, y los reportes JaCoCo ya se conservan como artifacts del pipeline (pestaña "Artifacts"). Si querés codecov en una v2: re-declarar el orb, agregar el paso `codecov/upload` después del reporte JaCoCo y cargar `CODECOV_TOKEN` como secret del proyecto.
+
+**¿Por qué SpotBugs generaba reportes vacíos en CircleCI?**
+Bug de tilde: la ruta de clases estaba como `"~/jabref/..."` entre comillas, y `~` entre comillas **no se expande** en bash → el chequeo `[ -d ]` fallaba silenciosamente para todos los módulos → el análisis nunca corría y la carpeta de reportes quedaba vacía. El fix fue usar `$HOME` (que sí se expande entre comillas); ahora los reportes SpotBugs se generan con contenido.

@@ -18,10 +18,6 @@
 
 version: 2.1
 
-orbs:
-  # El orb de codecov sube la cobertura a codecov.io automáticamente
-  codecov: codecov/codecov@4.1.0
-
 # ----------------------------------------------------------------------------
 # Executors: imágenes Docker reutilizables
 # ----------------------------------------------------------------------------
@@ -102,6 +98,12 @@ jobs:
             mkdir -p ~/reports/test-results ~/reports/jacoco
             find . -path "*/build/test-results/test" -type d -exec cp -r {} ~/reports/test-results/ \; 2>/dev/null || true
             find . -path "*/build/reports/jacoco/test/html" -type d -exec cp -r {} ~/reports/jacoco/ \; 2>/dev/null || true
+      # Sube los JUnit XML consolidados a TestRail (trcli). Sin credenciales TESTRAIL_*
+      # el script salta limpio (exit 0) — los forks sin TestRail siguen funcionando igual.
+      - run:
+          name: "🧷 Subir resultados a TestRail"
+          when: always
+          command: bash scripts/upload-testrail.sh "$HOME/reports/test-results/test/TEST-*.xml"
       - store_test_results:
           path: ~/reports/test-results
       - store_artifacts:
@@ -159,7 +161,7 @@ jobs:
             export SPOTBUGS_HOME=$HOME/spotbugs-$SPOTBUGS_VERSION
             mkdir -p ~/reports/spotbugs
             for module in jablib jabgui jabkit jabsrv jabls jabls-cli jabsrv-cli; do
-              classes_dir="~/jabref/$module/build/classes/java/main"
+              classes_dir="$HOME/jabref/$module/build/classes/java/main"
               if [ -d "$classes_dir" ]; then
                 echo "Analizando $module..."
                 $SPOTBUGS_HOME/bin/spotbugs \
