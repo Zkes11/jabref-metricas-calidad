@@ -36,6 +36,16 @@ variables:
   GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.caching=true -Dorg.gradle.parallel=true'
   GRADLE_USER_HOME: $(Pipeline.Workspace)/.gradle
   JDK_VERSION: '25'
+  # --- TestRail (opcional): defaults VACÍOS a propósito.
+  # Sin valores reales, el paso 🚀 salta limpio (gate del script: 1 línea + exit 0).
+  # Los valores reales NUNCA van en este archivo: configuralos como variable group
+  # (recomendado) o variables del pipeline, con estos MISMOS nombres — ver
+  # docs/calidad/testrail-setup-circleci.md (§ Azure Pipelines).
+  TESTRAIL_URL: ''
+  TESTRAIL_EMAIL: ''
+  TESTRAIL_KEY: ''
+  TESTRAIL_PROJECT: ''
+  TESTRAIL_SUITE_ID: ''
 
 stages:
   - stage: Calidad
@@ -87,6 +97,9 @@ stages:
               sudo apt-get install -y xvfb
             displayName: '🖥️ Instalar xvfb'
 
+          # ⚠️ SEMÁNTICA INTENCIONAL (continueOnError): el job se muestra VERDE aunque
+          # fallen los tests — política "siempre recolectar reportes". Los fallos reales
+          # se ven en la pestaña Tests (y en TestRail). Ver FAQ en docs/calidad/README.md.
           # --- Tests unitarios (sin databaseTest ni fetcherTest que requieren servicios externos) ---
           - script: |
               xvfb-run --auto-servernum ./gradlew test --no-daemon --stacktrace \
@@ -96,6 +109,8 @@ stages:
               GRADLE_USER_HOME: $(GRADLE_USER_HOME)
             continueOnError: true
 
+          # ⚠️ SEMÁNTICA INTENCIONAL (continueOnError): aunque JaCoCo falle, el job sigue
+          # verde para poder recolectar lo que sí se generó. Ver FAQ en docs/calidad/README.md.
           # --- Reporte de cobertura con JaCoCo (-x test: no volver a correr tests fallidos) ---
           - script: |
               xvfb-run --auto-servernum ./gradlew :jablib:jacocoTestReport -x test --no-daemon
@@ -111,14 +126,32 @@ stages:
               testResultsFormat: 'JUnit'
               testResultsFiles: '**/build/test-results/test/TEST-*.xml'
               mergeTestResults: true
-              failTaskOnFailedTests: false
+              failTaskOnFailedTests: false  # ⚠️ intencional: no romper el job por tests fallidos (ver FAQ docs/calidad/README.md)
               testRunTitle: 'JUnit Tests'
             displayName: '📤 Publicar resultados de tests'
+
+          # --- Subir resultados a TestRail (opcional, gateado por credenciales) ---
+          # Reusa el MISMO script de CircleCI (scripts/upload-testrail.sh): sin las
+          # TESTRAIL_* configuradas imprime 1 línea de skip y sale 0 (job verde).
+          # El glob es EXACTAMENTE el que consume PublishTestResults@2 arriba.
+          # Secretos: Azure NO inyecta variables secretas automáticamente a los
+          # scripts — por eso el mapeo explícito por env: (patrón documentado).
+          - script: bash scripts/upload-testrail.sh "**/build/test-results/test/TEST-*.xml"
+            condition: always()
+            displayName: '🚀 Subir resultados a TestRail'
+            env:
+              TESTRAIL_URL: $(TESTRAIL_URL)
+              TESTRAIL_EMAIL: $(TESTRAIL_EMAIL)
+              TESTRAIL_KEY: $(TESTRAIL_KEY)
+              TESTRAIL_PROJECT: $(TESTRAIL_PROJECT)
+              TESTRAIL_SUITE_ID: $(TESTRAIL_SUITE_ID)
 
           # --- Consolidar reportes JaCoCo de todos los módulos ---
           - script: |
               mkdir -p $(Build.SourcesDirectory)/build/jacoco-all
-              find . -name "jacocoTestReport.xml" -path "*/build/reports/jacoco/*" -exec cp {} $(Build.SourcesDirectory)/build/jacoco-all/ \;
+              # Prefijo de módulo anti-colisión: sin él, el cp plano sobreescribía el
+              # jacocoTestReport.xml de cada módulo sobre el mismo archivo final.
+              find . -name "jacocoTestReport.xml" -path "*/build/reports/jacoco/*" -exec bash -c 'module=$(echo "{}" | sed "s|^\./||; s|/build/.*||"); cp "{}" "$(Build.SourcesDirectory)/build/jacoco-all/jacocoTestReport-${module}.xml"' \;
               find . -type d -name "html" -path "*/build/reports/jacoco/test/*" -exec bash -c 'module=$(echo {} | sed "s|^\./||; s|/build/.*||"); mkdir -p $(Build.SourcesDirectory)/build/jacoco-all/html/$module; cp -r {}/* $(Build.SourcesDirectory)/build/jacoco-all/html/$module/' \;
               ls -la $(Build.SourcesDirectory)/build/jacoco-all/ || true
             displayName: '📋 Consolidar reportes JaCoCo'
@@ -127,7 +160,7 @@ stages:
           - task: PublishCodeCoverageResults@2
             condition: always()
             inputs:
-              summaryFileLocation: '$(Build.SourcesDirectory)/build/jacoco-all/jacocoTestReport.xml'
+              summaryFileLocation: '$(Build.SourcesDirectory)/build/jacoco-all/jacocoTestReport-*.xml'
               pathToSources: '$(Build.SourcesDirectory)'
               failIfCoverageEmpty: false
             displayName: '📤 Publicar cobertura de código'
