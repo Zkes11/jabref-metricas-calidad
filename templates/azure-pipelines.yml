@@ -1,0 +1,114 @@
+# ======================================================================
+# Pipeline de calidad genérico — plantilla Azure Pipelines
+#
+# Cómo adoptar (ver README.md):
+#   1. Copiá este archivo a la raíz de tu repo (azure-pipelines.yml).
+#   2. Copiá templates/scripts/ a scripts/ de tu repo.
+#   3. Editá SOLO el bloque ⚙️ CONFIGURÁ de abajo.
+#
+# La API completa de variables está en CONTRACT.md.
+# ======================================================================
+
+trigger:
+  - main
+
+pr:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  # ================================================================
+  # ⚙️ CONFIGURÁ — tocá solo este bloque
+  # (vacía = default del ECOSYSTEM, resuelto por scripts/setup-defaults.sh)
+  # ================================================================
+  ECOSYSTEM: java # java | python | node
+  BUILD_CMD: ''        # default java: ./gradlew assemble --no-daemon
+  TEST_CMD: ''         # única requerida (vía default u override): DEBE dejar JUnit XML en JUNIT_GLOB
+  JUNIT_GLOB: ''       # default java: **/build/test-results/test/TEST-*.xml
+  COVERAGE_CMD: ''     # opcional — vacía = paso de coverage se salta
+  COVERAGE_REPORT: ''  # opcional — path/glob del reporte de cobertura
+  # TestRail: cargalas como SECRETS del CI, nunca escritas acá. Dos opciones:
+  #   (a) variable group vinculado (Library) con mapeo:  TESTRAIL_KEY: $(TESTRAIL_KEY)
+  #   (b) secret variables del pipeline.
+  # Con las 3 de auth vacías la subida se auto-salta (gate de 1 línea, ver CONTRACT.md §2).
+  TESTRAIL_URL: ''
+  TESTRAIL_EMAIL: ''
+  TESTRAIL_KEY: ''
+  TESTRAIL_PROJECT: ''
+  TESTRAIL_SUITE_ID: ''
+  TESTRAIL_SECTION_ID: ''
+  # ================================================================
+
+jobs:
+  - job: Build_Test
+    steps:
+      - checkout: self
+
+      - script: bash scripts/setup-defaults.sh
+        displayName: '⚙️ Resolver defaults del contrato'
+        # Nota: ##vso[task.setvariable] aplica desde el step SIGUIENTE, no el actual
+        # (por eso este es siempre el primer step tras el checkout — ver CONTRACT.md §7).
+
+      - script: |
+          if [ -n "$BUILD_CMD" ]; then
+            eval "$BUILD_CMD"
+          else
+            echo ">> BUILD_CMD vacía — skip"
+          fi
+        displayName: '🔨 Build'
+
+      - script: eval "$TEST_CMD"
+        displayName: '🧪 Tests'
+        # ⚠️ SEMÁNTICA INTENCIONAL: continueOnError hace que el job siga (verde)
+        # aunque haya tests fallidos — postura "siempre recolectar reportes".
+        # Los fallos reales se ven en la pestaña Tests. Ver README.md.
+        continueOnError: true
+
+      - script: bash scripts/collect-junit.sh
+        displayName: '📦 Consolidar JUnit XML (canonizar a reports/junit/)'
+        condition: always()
+
+      - task: PublishTestResults@2
+        # Azure quiere un GLOB — por eso collect-junit.sh canoniza todo a reports/junit/
+        inputs:
+          testResultsFormat: 'JUnit'
+          testResultsFiles: 'reports/junit/*.xml'
+          mergeTestResults: true
+          # ⚠️ failTaskOnFailedTests: false — coherente con el continueOnError de arriba
+          # (postura "siempre recolectar"; los fallos reales se ven en la pestaña Tests).
+          failTaskOnFailedTests: false
+        condition: always()
+
+      - script: bash scripts/upload-testrail.sh "reports/junit/*.xml"
+        displayName: '🧷 Subir a TestRail (opcional, gateado)'
+        # Gate: si TESTRAIL_URL/EMAIL/KEY no están (secrets del CI), el script
+        # imprime 1 línea y sale 0 — este paso nunca bloquea el job.
+        condition: always()
+
+      - script: |
+          if [ -n "$COVERAGE_CMD" ]; then
+            eval "$COVERAGE_CMD"
+            mkdir -p reports/coverage
+            # $COVERAGE_REPORT SIN comillas: es un glob (ej. **/build/reports/jacoco/test/jacocoTestReport.xml)
+            shopt -s globstar nullglob
+            cp $COVERAGE_REPORT reports/coverage/ 2>/dev/null || true
+            echo ">> coverage copiado a reports/coverage/"
+          else
+            echo ">> COVERAGE_CMD vacía — skip"
+          fi
+        displayName: '📊 Coverage (opcional)'
+        condition: always()
+
+      - task: PublishCodeCoverageResults@2
+        inputs:
+          summaryFileLocation: 'reports/coverage/**' # glob — combina multi-módulo
+          failIfCoverageEmpty: false
+        condition: always()
+
+      - task: PublishBuildArtifacts@1
+        inputs:
+          PathtoPublish: 'reports'
+          ArtifactName: 'quality-reports'
+        condition: always()

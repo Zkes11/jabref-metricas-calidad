@@ -1,0 +1,106 @@
+# ======================================================================
+# Pipeline de calidad genérico — plantilla CircleCI
+#
+# Cómo adoptar (ver README.md):
+#   1. Copiá este archivo a .circleci/config.yml de tu repo.
+#   2. Copiá templates/scripts/ a scripts/ de tu repo.
+#   3. Editá SOLO el bloque ⚙️ CONFIGURÁ de abajo (y la imagen, punto de
+#      edición manual).
+#
+# La API completa de variables está en CONTRACT.md.
+# ======================================================================
+
+version: 2.1
+
+jobs:
+  build_test:
+    working_directory: ~/project
+    docker:
+      # ⚙️ PUNTO DE EDICIÓN MANUAL — la imagen NO puede venir de una env var.
+      # Elegí según tu ECOSYSTEM:
+      #   java:   cimg/openjdk:25.0
+      #   python: cimg/python:3.12
+      #   node:   cimg/node:22.x
+      - image: cimg/openjdk:25.0
+    environment:
+      # ================================================================
+      # ⚙️ CONFIGURÁ — tocá solo este bloque
+      # (vacía = default del ECOSYSTEM, resuelto por scripts/setup-defaults.sh)
+      # ================================================================
+      ECOSYSTEM: java # java | python | node
+      BUILD_CMD: ""        # default java: ./gradlew assemble --no-daemon
+      TEST_CMD: ""         # única requerida (vía default u override): DEBE dejar JUnit XML en JUNIT_GLOB
+      JUNIT_GLOB: ""       # default java: **/build/test-results/test/TEST-*.xml
+      COVERAGE_CMD: ""     # opcional — vacía = paso de coverage se salta
+      COVERAGE_REPORT: ""  # opcional — path/glob del reporte de cobertura
+      # TestRail: van como secrets del CI (Project Settings > Environment
+      # Variables), NUNCA escritas acá. Con las 3 de auth vacías la subida
+      # se auto-salta (gate de 1 línea, ver CONTRACT.md §2).
+      TESTRAIL_URL: ""
+      TESTRAIL_EMAIL: ""
+      TESTRAIL_KEY: ""
+      TESTRAIL_PROJECT: ""
+      TESTRAIL_SUITE_ID: ""
+      TESTRAIL_SECTION_ID: ""
+      # ================================================================
+
+    steps:
+      - checkout
+
+      - run:
+          name: ⚙️ Resolver defaults del contrato
+          # persiste los defaults vía $BASH_ENV (CircleCI no mantiene export entre steps)
+          command: bash scripts/setup-defaults.sh
+
+      - run:
+          name: 🔨 Build
+          # vacía = este ecosistema no necesita build → skip limpio
+          command: |
+            if [ -n "$BUILD_CMD" ]; then
+              eval "$BUILD_CMD"
+            else
+              echo ">> BUILD_CMD vacía — skip"
+            fi
+
+      - run:
+          name: 🧪 Tests
+          # tu TEST_CMD DEBE dejar JUnit XML en disco en JUNIT_GLOB (regla del contrato)
+          command: eval "$TEST_CMD"
+
+      - run:
+          name: 📦 Consolidar JUnit XML (canonizar a reports/junit/)
+          command: bash scripts/collect-junit.sh
+          when: always
+
+      - run:
+          name: 🧷 Subir a TestRail (opcional, gateado)
+          # Gate: si TESTRAIL_URL/EMAIL/KEY no están (secrets del CI), el script
+          # imprime 1 línea y sale 0 — este paso nunca bloquea el job.
+          command: bash scripts/upload-testrail.sh "reports/junit/*.xml"
+          when: always
+
+      - store_test_results:
+          # CircleCI quiere un DIRECTORIO — por eso collect-junit.sh canoniza todo acá
+          path: reports/junit
+
+      - run:
+          name: 📊 Coverage (opcional)
+          command: |
+            if [ -n "$COVERAGE_CMD" ]; then
+              eval "$COVERAGE_CMD"
+            else
+              echo ">> COVERAGE_CMD vacía — skip"
+            fi
+          when: always
+
+      - store_artifacts:
+          path: reports/
+
+      - store_artifacts:
+          path: reports/junit/
+          destination: junit-xml
+
+workflows:
+  quality:
+    jobs:
+      - build_test
