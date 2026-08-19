@@ -47,12 +47,23 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # --- Instalación de trcli (versión pineada; ladder defensivo para imágenes sin pip listo) ---
 # Algunas imágenes base traen python3 pero pip puede faltar; Ubuntu 24.04 puede aplicar PEP 668.
+# OJO: --break-system-packages solo existe en pip >= 23.0. En Ubuntu 22.04 (jammy,
+# cimg/openjdk:25.0) el pip de apt es 22.0.2 y NO soporta el flag (ni lo necesita:
+# jammy no aplica PEP 668). Se agrega el flag solo si el pip lo soporta.
+install_trcli() {
+  local extra=""
+  if python3 -m pip --version 2>/dev/null | grep -qE "pip (2[3-9]|[3-9][0-9])"; then
+    extra="--break-system-packages"
+  fi
+  python3 -m pip install --quiet --user $extra "trcli==${TRCLI_VERSION}"
+}
+
 if ! pip3 install --quiet "trcli==${TRCLI_VERSION}" 2>/dev/null; then
   if ! python3 -m pip install --quiet --user "trcli==${TRCLI_VERSION}" 2>/dev/null; then
     if ! command -v pip3 >/dev/null 2>&1; then
       sudo apt-get update -qq && sudo apt-get install -y python3-pip
     fi
-    python3 -m pip install --quiet --user --break-system-packages "trcli==${TRCLI_VERSION}"
+    install_trcli
   fi
 fi
 command -v trcli >/dev/null 2>&1 || { echo "!! trcli no quedó disponible en PATH tras la instalación"; exit 1; }
