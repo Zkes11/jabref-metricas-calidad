@@ -76,9 +76,11 @@ jobs:
           name: 🧷 Subir a TestRail (opcional, gateado)
           # Gate: si TESTRAIL_URL/EMAIL/KEY no están (secrets del CI), el script
           # imprime 1 línea y sale 0 — este paso nunca bloquea el job.
+          # no_output_timeout: la PRIMERA subida crea miles de casos vía API y
+          # trcli no emite output mientras los crea; el default de 10m no alcanza.
+          no_output_timeout: 120m
           command: bash scripts/upload-testrail.sh "reports/junit/*.xml"
           when: always
-
       - store_test_results:
           # CircleCI quiere un DIRECTORIO — por eso collect-junit.sh canoniza todo acá
           path: reports/junit

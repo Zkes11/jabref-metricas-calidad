@@ -103,6 +103,9 @@ jobs:
       - run:
           name: "🧷 Subir resultados a TestRail"
           when: always
+          # no_output_timeout: la PRIMERA subida crea ~11k casos vía API y trcli
+          # no emite output mientras los crea; el default de 10m no alcanza.
+          no_output_timeout: 120m
           command: bash scripts/upload-testrail.sh "$HOME/reports/test-results/test/TEST-*.xml"
       - store_test_results:
           path: ~/reports/test-results
