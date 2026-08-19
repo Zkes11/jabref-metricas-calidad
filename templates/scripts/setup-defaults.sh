@@ -6,13 +6,17 @@
 #   (lo llaman las plantillas de CI como primer paso tras el checkout; también sirve local)
 #
 # Env vars (ver CONTRACT.md — la API completa):
-#   ECOSYSTEM                 REQUERIDA — java | python | node. Selecciona los defaults.
+#   ECOSYSTEM                 OPCIONAL — java | python | node. Vacía = auto-detección
+#                             por archivos del repo (package.json → node;
+#                             requirements.txt|pyproject.toml|setup.py → python;
+#                             build.gradle|pom.xml → java). Override explícito siempre gana.
 #   BUILD_CMD / TEST_CMD / JUNIT_GLOB / COVERAGE_CMD / COVERAGE_REPORT
 #                             Opcionales — si vienen vacías se llenan con el default del
 #                             ecosistema (patrón ": ${VAR:=default}" — nunca pisa lo seteado).
 #
 # Comportamiento:
-#   - ECOSYSTEM vacía o desconocida → error claro + exit 1.
+#   - ECOSYSTEM vacía → auto-detección por archivos del repo; si no se detecta nada
+#     o el valor es desconocido → error claro + exit 1.
 #   - Persistencia multi-CI (pitfalls de cada CI, ver CONTRACT.md §7):
 #       CircleCI (detecta CIRCLECI):     appendea los exports a $BASH_ENV
 #                                       (los export de un run: NO persisten al step siguiente).
@@ -21,6 +25,17 @@
 #   - Siempre además exporta localmente e imprime las vars resueltas (depurabilidad).
 #   - Validación final: TEST_CMD no puede quedar vacía (es la única requerida además de ECOSYSTEM).
 set -euo pipefail
+
+# --- Auto-detección: ECOSYSTEM vacía → inferir del repo (override explícito siempre gana) ---
+if [ -z "${ECOSYSTEM:-}" ]; then
+  if [ -f package.json ]; then
+    ECOSYSTEM="node"
+  elif [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f setup.py ]; then
+    ECOSYSTEM="python"
+  elif [ -f build.gradle ] || [ -f build.gradle.kts ] || [ -f pom.xml ]; then
+    ECOSYSTEM="java"
+  fi
+fi
 
 case "${ECOSYSTEM:-}" in
   java)
@@ -45,7 +60,7 @@ case "${ECOSYSTEM:-}" in
     : "${COVERAGE_REPORT:=coverage/lcov.info}"
     ;;
   "")
-    echo "!! ECOSYSTEM no está seteada. Valores soportados: java | python | node (ver CONTRACT.md)" >&2
+    echo "!! ECOSYSTEM no está seteada y no se pudo auto-detectar (package.json / requirements.txt|pyproject.toml|setup.py / build.gradle|pom.xml). Seteala explícitamente: java | python | node (ver CONTRACT.md)" >&2
     exit 1
     ;;
   *)

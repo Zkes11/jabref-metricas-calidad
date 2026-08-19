@@ -8,7 +8,7 @@
 
 | Variable | Requerida | Significado |
 |---|---|---|
-| `ECOSYSTEM` | **Sí** | Selecciona los defaults: `java` \| `python` \| `node` |
+| `ECOSYSTEM` | No (auto-detect) | Selecciona los defaults: `java` \| `python` \| `node`. Vacía = se infiere de los archivos del repo (`package.json` → node; `requirements.txt`/`pyproject.toml`/`setup.py` → python; `build.gradle`/`pom.xml` → java). Override explícito siempre gana |
 | `BUILD_CMD` | No | Instala/compila dependencias. Vacía = default del ecosistema; si el ecosistema no necesita build, dejarla vacía saltea el paso |
 | `TEST_CMD` | **Sí** (única requerida además de `ECOSYSTEM`) | Corre los tests. **Tu `TEST_CMD` DEBE dejar JUnit XML en disco en `JUNIT_GLOB`** — es la única obligación real del repo adoptante |
 | `JUNIT_GLOB` | No | Dónde caen los JUnit XML que produce `TEST_CMD` |
@@ -61,7 +61,7 @@ lo que ya vino seteado NUNCA se pisa.
 | `COVERAGE_CMD` | `./gradlew jacocoTestReport` | `coverage run -m pytest && coverage xml` | `npx jest --coverage` |
 | `COVERAGE_REPORT` | `**/build/reports/jacoco/test/jacocoTestReport.xml` | `coverage.xml` | `coverage/lcov.info` |
 
-`ECOSYSTEM` vacía o desconocida → error claro + `exit 1` (no hay adivinación silenciosa).
+`ECOSYSTEM` vacía → auto-detección por archivos del repo (ver §1); si no se detecta nada o el valor es desconocido → error claro + `exit 1` (no hay adivinación silenciosa).
 
 ## 5. Canonicalización: `reports/junit/`
 

@@ -4,8 +4,8 @@
 # Cómo adoptar (ver README.md):
 #   1. Copiá este archivo a .circleci/config.yml de tu repo.
 #   2. Copiá templates/scripts/ a scripts/ de tu repo.
-#   3. Editá SOLO el bloque ⚙️ CONFIGURÁ de abajo (y la imagen, punto de
-#      edición manual).
+#   3. Listo — ECOSYSTEM se auto-detecta por los archivos del repo y la imagen
+#      base instala el runtime que haga falta. Cero edición manual.
 #
 # La API completa de variables está en CONTRACT.md.
 # ======================================================================
@@ -16,18 +16,15 @@ jobs:
   build_test:
     working_directory: ~/project
     docker:
-      # ⚙️ PUNTO DE EDICIÓN MANUAL — la imagen NO puede venir de una env var.
-      # Elegí según tu ECOSYSTEM:
-      #   java:   cimg/openjdk:25.0
-      #   python: cimg/python:3.12
-      #   node:   cimg/node:22.x
-      - image: cimg/openjdk:25.0
+      # Imagen base universal: el paso "🔧 Asegurar runtime" instala el runtime
+      # del ECOSYSTEM detectado (java/python/node). Cero edición manual.
+      - image: cimg/base:current
     environment:
       # ================================================================
       # ⚙️ CONFIGURÁ — tocá solo este bloque
       # (vacía = default del ECOSYSTEM, resuelto por scripts/setup-defaults.sh)
       # ================================================================
-      ECOSYSTEM: java # java | python | node
+      ECOSYSTEM: "" # vacía = auto-detect por archivos del repo (package.json → node, etc.)
       BUILD_CMD: ""        # default java: ./gradlew assemble --no-daemon
       TEST_CMD: ""         # única requerida (vía default u override): DEBE dejar JUnit XML en JUNIT_GLOB
       JUNIT_GLOB: ""       # default java: **/build/test-results/test/TEST-*.xml
@@ -46,6 +43,30 @@ jobs:
 
     steps:
       - checkout
+
+      - run:
+          name: 🔧 Asegurar runtime del ecosistema
+          # cimg/base no trae JDK/Node/Python — instala el del ECOSYSTEM detectado.
+          # (Si el repo ya trae su runtime vía BUILD_CMD, este paso es un no-op rápido.)
+          command: |
+            case "$ECOSYSTEM" in
+              java)
+                if ! command -v java >/dev/null 2>&1; then
+                  sudo apt-get update -qq && sudo apt-get install -y openjdk-21-jdk-headless
+                fi
+                ;;
+              python)
+                if ! command -v python3 >/dev/null 2>&1; then
+                  sudo apt-get update -qq && sudo apt-get install -y python3 python3-pip
+                fi
+                ;;
+              node)
+                if ! command -v node >/dev/null 2>&1; then
+                  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+                  sudo apt-get install -y nodejs
+                fi
+                ;;
+            esac
 
       - run:
           name: ⚙️ Resolver defaults del contrato
