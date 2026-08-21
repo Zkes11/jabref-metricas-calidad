@@ -4,6 +4,7 @@ import com.vanniktech.maven.publish.SourcesJar
 import dev.jbang.gradle.tasks.JBangTask
 import net.ltgt.gradle.errorprone.errorprone
 import net.ltgt.gradle.nullaway.nullaway
+import org.gradle.testing.jacoco.tasks.JacocoReport
 import org.gradle.api.tasks.testing.logging.TestExceptionFormat
 import org.jabref.gradle.EmbeddedPostgresBinaries
 import java.util.Calendar
@@ -328,37 +329,31 @@ tasks.register<Test>("databaseTest") {
     maxParallelForks = 1
 }
 
-/*
-tasks.register('jacocoPrepare') {
+// Prepara los tests para el reporte de cobertura completo: los fallos no rompen el build
+// (quedan registrados en los XML que sube TestRail) y las 3 suites corren antes del reporte.
+val jacocoPrepare = tasks.register("jacocoPrepare") {
     doFirst {
-        // Ignore failures of tests
-        tasks.withType(Test).tap {
-            configureEach {
-                ignoreFailures = true
-            }
+        tasks.withType<Test>().configureEach {
+            isIgnoreFailures = true
         }
     }
 }
-test.mustRunAfter jacocoPrepare
-databaseTest.mustRunAfter jacocoPrepare
-fetcherTest.mustRunAfter jacocoPrepare
-
-jacocoTestReport {
-    dependsOn jacocoPrepare, test, fetcherTest, databaseTest
-
-    executionData files(
-            layout.buildDirectory.file('jacoco/test.exec').get().asFile,
-            layout.buildDirectory.file('jacoco/fetcherTest.exec').get().asFile,
-            layout.buildDirectory.file('jacoco/databaseTest.exec').get().asFile)
-
+tasks.withType<Test>().configureEach {
+    mustRunAfter(jacocoPrepare)
+}
+tasks.named<JacocoReport>("jacocoTestReport") {
+    dependsOn(jacocoPrepare, tasks.named("test"), tasks.named("fetcherTest"), tasks.named("databaseTest"))
+    executionData(
+        layout.buildDirectory.file("jacoco/test.exec").get().asFile,
+        layout.buildDirectory.file("jacoco/fetcherTest.exec").get().asFile,
+        layout.buildDirectory.file("jacoco/databaseTest.exec").get().asFile
+    )
     reports {
         csv.required = true
         html.required = true
-        // coveralls plugin depends on xml format report
         xml.required = true
     }
 }
-*/
 
 mavenPublishing {
   configure(JavaLibrary(

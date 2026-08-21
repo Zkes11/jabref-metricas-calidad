@@ -30,6 +30,20 @@ executors:
     environment:
       GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.caching=true -Dorg.gradle.parallel=true -Xmx4g"
       JAVA_TOOL_OPTIONS: "-Xmx4g"
+  # Igual que jdk25 + PostgreSQL como service container: los databaseTest
+  # (org.jabref.logic.shared) conectan a localhost:5432 con postgres/postgres.
+  jdk25_db:
+    docker:
+      - image: cimg/openjdk:25.0
+      - image: cimg/postgres:16
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+    working_directory: ~/jabref
+    environment:
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.caching=true -Dorg.gradle.parallel=true -Xmx4g"
+      JAVA_TOOL_OPTIONS: "-Xmx4g"
 
 # ----------------------------------------------------------------------------
 # Comandos reutilizables
@@ -69,7 +83,7 @@ commands:
 # ----------------------------------------------------------------------------
 jobs:
   build_test:
-    executor: jdk25
+    executor: jdk25_db
     description: "Compila + tests unitarios + cobertura"
     steps:
       - checkout
@@ -82,21 +96,19 @@ jobs:
           name: "🖥️ Instalar xvfb (display virtual para tests JavaFX)"
           command: sudo apt-get update && sudo apt-get install -y xvfb
       - run:
-          name: "🧪 Tests unitarios"
-          command: xvfb-run --auto-servernum ./gradlew test --no-daemon --stacktrace -x databaseTest -x fetcherTest
-      - run:
-          name: "📊 Reporte JaCoCo"
-          # -x test evita que JaCoCo vuelva a correr los tests fallidos.
-          # Usa los .exec files generados por el paso "Tests unitarios".
-          command: xvfb-run --auto-servernum ./gradlew :jablib:jacocoTestReport -x test --no-daemon
-          when: always
+          name: "🧪 Tests (unit + fetcher + database) + 📊 JaCoCo"
+          # jacocoTestReport depende de test+fetcherTest+databaseTest (build.gradle.kts)
+          # y jacocoPrepare activa ignoreFailures: los fallos no rompen el job,
+          # quedan en los XML (TestRail los muestra igual).
+          # fetcherTest usa APIs reales; databaseTest usa el PostgreSQL del executor.
+          command: xvfb-run --auto-servernum ./gradlew :jablib:jacocoTestReport --no-daemon --stacktrace
       # CircleCI recolecta los XML de test y los muestra en la pestaña "Tests"
       - run:
           name: "📦 Consolidar reportes para artifacts"
           when: always
           command: |
             mkdir -p ~/reports/test-results ~/reports/jacoco
-            find . -path "*/build/test-results/test" -type d -exec cp -r {} ~/reports/test-results/ \; 2>/dev/null || true
+            find . -path "*/build/test-results/*" -name "TEST-*.xml" -exec cp {} ~/reports/test-results/ \; 2>/dev/null || true
             find . -path "*/build/reports/jacoco/test/html" -type d -exec cp -r {} ~/reports/jacoco/ \; 2>/dev/null || true
       # Sube los JUnit XML consolidados a TestRail (trcli). Sin credenciales TESTRAIL_*
       # el script salta limpio (exit 0) — los forks sin TestRail siguen funcionando igual.
@@ -106,7 +118,7 @@ jobs:
           # no_output_timeout: la PRIMERA subida crea ~11k casos vía API y trcli
           # no emite output mientras los crea; el default de 10m no alcanza.
           no_output_timeout: 120m
-          command: bash scripts/upload-testrail.sh "$HOME/reports/test-results/test/TEST-*.xml"
+          command: bash scripts/upload-testrail.sh "$HOME/reports/test-results/TEST-*.xml"
       - store_test_results:
           path: ~/reports/test-results
       - store_artifacts:
