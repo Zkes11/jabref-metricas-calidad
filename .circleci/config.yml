@@ -101,6 +101,9 @@ jobs:
           # y jacocoPrepare activa ignoreFailures: los fallos no rompen el job,
           # quedan en los XML (TestRail los muestra igual).
           # fetcherTest usa APIs reales; databaseTest usa el PostgreSQL del executor.
+          # no_output_timeout: los fetcher tests corren SECUENCIAL contra APIs reales
+          # y pasan largos ratos sin emitir output — el default de 10m mata el paso.
+          no_output_timeout: 90m
           command: xvfb-run --auto-servernum ./gradlew :jablib:jacocoTestReport --no-daemon --stacktrace
       # CircleCI recolecta los XML de test y los muestra en la pestaña "Tests"
       - run:
