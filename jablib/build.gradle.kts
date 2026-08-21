@@ -334,7 +334,7 @@ tasks.register<Test>("databaseTest") {
 val jacocoPrepare = tasks.register("jacocoPrepare") {
     doFirst {
         tasks.withType<Test>().configureEach {
-            isIgnoreFailures = true
+            ignoreFailures = true
         }
     }
 }

@@ -35,7 +35,7 @@ executors:
   jdk25_db:
     docker:
       - image: cimg/openjdk:25.0
-      - image: cimg/postgres:16
+      - image: postgres:16
         environment:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
