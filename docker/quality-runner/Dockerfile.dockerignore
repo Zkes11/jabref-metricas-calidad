@@ -1,0 +1,13 @@
+# Ignore POR-Dockerfile (BuildKit): cuando construís con
+#   docker build -f docker/quality-runner/Dockerfile .
+# BuildKit usa ESTE archivo en vez del .dockerignore raíz (que le
+# pertenece a los Dockerfiles de jabsrv/jabkit del upstream y NO se toca).
+#
+# Patrón allowlist: ignora TODO (*) y solo deja pasar lo que el Dockerfile
+# copia (templates/scripts/ y docker/quality-runner/). Así el contexto de
+# build pesa KB en vez de GB (el repo entero con .git y builds no viaja
+# al daemon).
+*
+
+!templates/scripts/
+!docker/quality-runner/
